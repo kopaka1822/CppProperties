@@ -1,4 +1,4 @@
-#include "property.h"
+#include "../property.h"
 #include <cassert>
 using namespace prop;
 
