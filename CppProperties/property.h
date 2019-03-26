@@ -1,5 +1,6 @@
 #pragma once
 #include <utility>
+#include <functional>
 
 namespace prop
 {
@@ -114,56 +115,100 @@ namespace prop
 		T* object;
 	};
 
-	template<class T, class TClass>
+	template<class T, class TClass, T(TClass::* FuncAddr)() const>
 	class ClassGetter : public IGetter<T>, virtual protected ClassBase<TClass>
 	{
 	public:
-		ClassGetter(const TClass* object, T(TClass::* function)() const)
+		ClassGetter(const TClass* object)
 			:
-		ClassBase<TClass>(const_cast<TClass*>(object)),
-		function(function)
+		ClassBase<TClass>(const_cast<TClass*>(object))
 		{}
 
 		operator T() const override final
 		{
-			return std::invoke(function, this->object);
+			return std::invoke(FuncAddr, this->object);
 		}
-	private:
-		T(TClass::* function)() const;
 	};
 
-	template<class T, class TClass>
+	template<class T, class TClass, void(TClass::* FuncAddr)(T)>
 	class ClassSetter : public ISetter<T>, virtual protected ClassBase<TClass>
 	{
 	public:
-		ClassSetter(TClass* object, void(TClass::* function)(T))
+		ClassSetter(TClass* object)
+			:
+		ClassBase<TClass>(object)
+		{}
+
+		void operator=(T value) override
+		{
+			std::invoke(FuncAddr, this->object, std::move(value));
+		}
+	};
+
+	template<class T, class TClass, T(TClass::* GetterAddr)() const, void(TClass::* SetterAddr)(T)>
+	class ClassGetterSetter final : public ClassGetter<T, TClass, GetterAddr>, public ClassSetter<T, TClass, SetterAddr>
+	{
+	public:
+		ClassGetterSetter(TClass* object)
 			:
 		ClassBase<TClass>(object),
+		ClassGetter<T, TClass, GetterAddr>(object),
+		ClassSetter<T, TClass, SetterAddr>(object)
+		{}
+		// must be done because it can't find the function for some reason...
+		virtual void operator=(T value) override
+		{
+			return ClassSetter<T, TClass, SetterAddr>::operator=(std::move(value));
+		}
+	};
+
+	template<class T>
+	class FunctionGetter : public IGetter<T>
+	{
+	public:
+		FunctionGetter(std::function<T()> function)
+			:
+		function(std::move(function))
+		{}
+
+		operator T() const override
+		{
+			return function();
+		}
+	private:
+		std::function<T()> function;
+	};
+
+	template<class T>
+	class FunctionSetter : public ISetter<T>
+	{
+	public:
+		FunctionSetter(std::function<void(T)> function)
+			:
 		function(function)
 		{}
 
 		void operator=(T value) override
 		{
-			std::invoke(function, this->object, std::move(value));
+			function(std::move(value));
 		}
 	private:
-		void(TClass::* function)(T);
+		std::function<void(T)> function;
 	};
 
-	template<class T, class TClass>
-	class ClassGetterSetter final : public ClassGetter<T, TClass>, public ClassSetter<T, TClass>
+	template<class T>
+	class FunctionGetterSetter : public FunctionGetter<T>, public FunctionSetter<T>
 	{
 	public:
-		ClassGetterSetter(TClass* object, T(TClass::* getter)() const, void(TClass::* setter)(T))
+		FunctionGetterSetter(std::function<T()> getter, std::function<void(T)> setter)
 			:
-		ClassBase<TClass>(object),
-		ClassGetter<T, TClass>(object, getter),
-		ClassSetter<T, TClass>(object, setter)
+		FunctionGetter<T>(std::move(getter)),
+		FunctionSetter<T>(std::move(setter))
 		{}
 		// must be done because it can't find the function for some reason...
 		virtual void operator=(T value) override
 		{
-			return ClassSetter<T, TClass>::operator=(std::move(value));
+			return FunctionSetter<T>::operator=(std::move(value));
 		}
 	};
 }
