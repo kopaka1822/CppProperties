@@ -11,9 +11,6 @@ namespace prop
 		IGetter() = default;
 		virtual ~IGetter() = default;
 		virtual operator T() const = 0;
-		// should not be copied
-		IGetter(const IGetter&) = delete;
-		IGetter& operator=(const IGetter&) = delete;
 	};
 
 	/// \brief interface for a property getter that returns a const reference instead of a copy
@@ -23,9 +20,6 @@ namespace prop
 		IRefGetter() = default;
 		virtual ~IRefGetter() = default;
 		virtual operator const T&() = 0;
-		// should not be copied
-		IRefGetter(const IRefGetter&) = delete;
-		IRefGetter& operator=(const IRefGetter&) = delete;
 	};
 
 	/// \brief interface for a property setter
@@ -35,35 +29,38 @@ namespace prop
 		ISetter() = default;
 		virtual ~ISetter() = default;
 		virtual void operator=(T value) = 0;
-		// should not be copied
-		ISetter(const ISetter&) = delete;
-		ISetter& operator=(const ISetter&) = delete;
 	};
 
-	template<class T>
-	class DefaultBase
+	namespace detail
 	{
-	protected:
-		DefaultBase() = default;
-		explicit DefaultBase(T init)
-			:
-		value(std::move(init))
-		{}
+		template<class T>
+		class DefaultBase
+		{
+		protected:
+			DefaultBase() = default;
+			explicit DefaultBase(T init)
+				:
+				value(std::move(init))
+			{}
 
-		T value;
-	};
+			T value;
+		};
+	}
 
 	/// \brief property implementation with a trivial getter
 	template<class T>
-	class DefaultGetter : public IGetter<T>, virtual protected DefaultBase<T>
+	class DefaultGetter : public IGetter<T>, virtual protected detail::DefaultBase<T>
 	{
 	public:
-		DefaultGetter() = default;
+		DefaultGetter()
+			:
+		detail::DefaultBase<T>()
+		{}
 		explicit DefaultGetter(T&& init)
 			:
-		DefaultBase<T>(std::move(init))
+		detail::DefaultBase<T>(std::move(init))
 		{}
-		virtual operator T() const override final
+		operator T() const override final
 		{
 			return this->value;
 		}
@@ -71,15 +68,18 @@ namespace prop
 
 	/// \brief property implementation with a trivial setter
 	template<class T>
-	class DefaultSetter : public ISetter<T>, virtual protected DefaultBase<T>
+	class DefaultSetter : public ISetter<T>, virtual protected detail::DefaultBase<T>
 	{
 	public:
-		DefaultSetter() = default;
+		DefaultSetter()
+			:
+		detail::DefaultBase<T>()
+		{}
 		explicit DefaultSetter(T&& init)
 			:
-			DefaultBase<T>(std::move(init))
+		detail::DefaultBase<T>(std::move(init))
 		{}
-		virtual void operator=(T value) override
+		void operator=(T value) override
 		{
 			this->value = std::move(value);
 		}
@@ -93,72 +93,14 @@ namespace prop
 		DefaultGetterSetter() = default;
 		explicit DefaultGetterSetter(T&& init)
 			:
-		DefaultBase<T>(std::move(init)),
+		detail::DefaultBase<T>(std::move(init)),
 		DefaultGetter<T>(),
 		DefaultSetter<T>()
 		{}
-		// must be done because it can't find the function for some reason...
+		// must be done because overloaded operators will be discarded in inheritance
 		virtual void operator=(T value) override
 		{
 			return DefaultSetter<T>::operator=(std::move(value));
-		}
-	};
-
-	template<class T>
-	class ClassBase
-	{
-	protected:
-		ClassBase(T* object)
-			:
-		object(object)
-		{}
-		T* object;
-	};
-
-	template<class T, class TClass, T(TClass::* FuncAddr)() const>
-	class ClassGetter : public IGetter<T>, virtual protected ClassBase<TClass>
-	{
-	public:
-		ClassGetter(const TClass* object)
-			:
-		ClassBase<TClass>(const_cast<TClass*>(object))
-		{}
-
-		operator T() const override final
-		{
-			return std::invoke(FuncAddr, this->object);
-		}
-	};
-
-	template<class T, class TClass, void(TClass::* FuncAddr)(T)>
-	class ClassSetter : public ISetter<T>, virtual protected ClassBase<TClass>
-	{
-	public:
-		ClassSetter(TClass* object)
-			:
-		ClassBase<TClass>(object)
-		{}
-
-		void operator=(T value) override
-		{
-			std::invoke(FuncAddr, this->object, std::move(value));
-		}
-	};
-
-	template<class T, class TClass, T(TClass::* GetterAddr)() const, void(TClass::* SetterAddr)(T)>
-	class ClassGetterSetter final : public ClassGetter<T, TClass, GetterAddr>, public ClassSetter<T, TClass, SetterAddr>
-	{
-	public:
-		ClassGetterSetter(TClass* object)
-			:
-		ClassBase<TClass>(object),
-		ClassGetter<T, TClass, GetterAddr>(object),
-		ClassSetter<T, TClass, SetterAddr>(object)
-		{}
-		// must be done because it can't find the function for some reason...
-		virtual void operator=(T value) override
-		{
-			return ClassSetter<T, TClass, SetterAddr>::operator=(std::move(value));
 		}
 	};
 
@@ -169,6 +111,11 @@ namespace prop
 		FunctionGetter(std::function<T()> function)
 			:
 		function(std::move(function))
+		{}
+		template<class TClass>
+		FunctionGetter(const TClass* object, T(TClass::* getter)() const)
+			:
+		function(std::bind(getter, object))
 		{}
 
 		operator T() const override
@@ -185,7 +132,12 @@ namespace prop
 	public:
 		FunctionSetter(std::function<void(T)> function)
 			:
-		function(function)
+		function(std::move(function))
+		{}
+		template<class TClass>
+		FunctionSetter(TClass* object, void(TClass::* setter)(T))
+			:
+		function(std::bind(setter, object, std::placeholders::_1))
 		{}
 
 		void operator=(T value) override
@@ -205,8 +157,14 @@ namespace prop
 		FunctionGetter<T>(std::move(getter)),
 		FunctionSetter<T>(std::move(setter))
 		{}
-		// must be done because it can't find the function for some reason...
-		virtual void operator=(T value) override
+		template<class TClass>
+		FunctionGetterSetter(TClass* object, T(TClass::* getter)() const, void(TClass::* setter)(T))
+			:
+		FunctionGetter<T>(object, getter),
+		FunctionSetter<T>(object, setter)
+		{}
+		// must be done because overloaded operators will be discarded in inheritance
+		void operator=(T value) override
 		{
 			return FunctionSetter<T>::operator=(std::move(value));
 		}

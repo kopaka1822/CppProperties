@@ -7,10 +7,7 @@ class TestClass
 public:
 	TestClass()
 		:
-	cg(this),
-	cs(this),
-	cgs(this),
-	fg(std::bind(&TestClass::getVar, this)),
+	fg(this, &TestClass::getVar),
 	fs(std::bind(&TestClass::setVar, this, std::placeholders::_1)),
 	fgs([this]() {return this->var; }, [this](int var) {this->var = var; })
 	{}
@@ -24,10 +21,6 @@ private:
 		return var;
 	}
 public:
-	ClassGetter<int, TestClass, &TestClass::getVar> cg;
-	ClassSetter<int, TestClass, &TestClass::setVar> cs;
-	ClassGetterSetter<int, TestClass, &TestClass::getVar, &TestClass::setVar> cgs;
-
 	FunctionGetter<int> fg;
 	FunctionSetter<int> fs;
 	FunctionGetterSetter<int> fgs;
@@ -37,6 +30,10 @@ private:
 
 int main()
 {
+	//p1 = 1.0f;
+	//float val = p1;
+
+
 	DefaultGetter<float> dg(10.0f);
 	float fval = dg;
 	assert(fval == 10.0f);
@@ -52,18 +49,9 @@ int main()
 	assert(dgs == 200);
 
 	TestClass tc;
-	ival = tc.cg;
-	assert(ival == 0);
-
-	tc.cs = 10;
-	assert(tc.cg == 10);
-
-	ival = tc.cgs;
-	assert(tc.cg == 10);
-	tc.cgs = 20;
 
 	ival = tc.fg;
-	assert(ival == 20);
+	assert(ival == 0);
 
 	tc.fs = 30;
 	assert(tc.fg == 30);
